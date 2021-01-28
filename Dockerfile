@@ -27,6 +27,7 @@ RUN set -ex; \
     && rm -rf /tmp/kong.deb \
     && chown kong:0 /usr/local/bin/kong \
     && chown -R kong:0 /usr/local/kong \
+    && chown -R kong:kong /usr/local/bin \
     && if [ "$ASSET" = "ce" ] ; then \
         kong version ; \
     fi;
