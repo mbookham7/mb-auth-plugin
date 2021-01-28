@@ -19,7 +19,7 @@ The remote server URL, and the incoming header are configurable. At a minimum th
 ## Enviroment
 
 ```
-docker-compose up -d
+docker-compose build && docker-compose up -d
 ```
 
 
