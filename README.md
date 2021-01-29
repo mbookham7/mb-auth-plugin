@@ -39,7 +39,7 @@ curl -i -X POST \
     --data 'strip_path=false'
 
 curl -X POST http://localhost:8001/services/headers-service/plugins \
-    --data name=basic-auth \
+    --data name=mb-auth-plugin \
     --data config.hide_credentials=false
 ```
 
@@ -56,6 +56,10 @@ curl -X POST http://localhost:8001/consumers/aladdin/basic-auth \
 Now we can call the service:
 ```
 curl --user aladdin:open-sesame http://localhost:8000/headers
+
+curl --user aladdin:close-the-door http://localhost:8000/headers
+
+curl http://localhost:8000/headers
 ```
 
 

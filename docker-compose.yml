@@ -68,6 +68,7 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PG_PASSWORD_FILE: /run/secrets/kong_postgres_password
+      KONG_LUA_PACKAGE_PATH: ./?.lua;./?/init.lua
     secrets:
       - kong_postgres_password
     networks:

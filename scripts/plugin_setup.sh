@@ -8,4 +8,11 @@ echo "Starting to Install custom plugins"
 cd /usr/local/custom/kong/plugins/mb-auth-plugin
 luarocks make
 
-echo "Done Installing custom plugi
+echo "Done Installing custom plugins"
+
+
+echo "Starting to Install Migrations"
+
+kong migrations up
+
+echo "Done Installing Migrations"
