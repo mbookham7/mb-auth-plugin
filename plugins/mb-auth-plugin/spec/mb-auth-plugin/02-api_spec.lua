@@ -17,10 +17,11 @@ for _, strategy in helpers.each_strategy() do
         "plugins",
         "consumers",
         "mbbasicauth_credentials",
-      })
+      }, {"mb-auth-plugin"})
 
       assert(helpers.start_kong({
         database = strategy,
+        plugins  = "bundled,mb-auth-plugin",
       }))
     end)
     lazy_teardown(function()
