@@ -1,4 +1,3 @@
-
 FROM ubuntu:xenial
 
 ARG ASSET=ce
@@ -37,7 +36,7 @@ RUN set -ex; \
 COPY ./conf/ /etc/kong/
 
 # Copy Plugins to directory where kong expects plugin rocks
-COPY ./plugins/ /usr/local/custom/kong/plugins/
+COPY ./kong/ /usr/local/custom/kong/
 
 # Copy scripts to starting location
 COPY ./scripts/ .

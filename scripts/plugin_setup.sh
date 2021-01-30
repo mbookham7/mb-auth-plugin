@@ -13,6 +13,8 @@ echo "Done Installing custom plugins"
 
 echo "Starting to Install Migrations"
 
+kong migrations finish
+
 kong migrations up
 
 echo "Done Installing Migrations"

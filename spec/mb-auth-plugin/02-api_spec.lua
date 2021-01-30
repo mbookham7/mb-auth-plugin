@@ -175,13 +175,11 @@ for _, strategy in helpers.each_strategy() do
 
       describe("GET", function()
         lazy_setup(function()
-          for i = 1, 3 do
-            bp.mbbasicauth_credentials:insert {
-              username = "bob" .. i,
-              password = "kong",
-              consumer = { id = consumer.id },
-            }
-          end
+          assert(db.mbbasicauth_credentials:insert {
+            username = "bob",
+            password = "kong",
+            consumer = { id = consumer.id },
+          })
         end)
         lazy_teardown(function()
           db:truncate("mbbasicauth_credentials")
