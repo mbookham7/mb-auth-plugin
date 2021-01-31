@@ -14,11 +14,13 @@ for _, strategy in helpers.each_strategy() do
         "services",
         "consumers",
         "plugins",
+        "basicauth_credentials",
         "mbbasicauth_credentials",
-      })
+      }, {"mb-auth-plugin"})
 
       assert(helpers.start_kong({
         database   = strategy,
+        plugins    = "bundled,mb-auth-plugin",
         nginx_conf = "spec/fixtures/custom_nginx.template",
       }))
     end)
@@ -27,30 +29,40 @@ for _, strategy in helpers.each_strategy() do
       helpers.stop_kong()
     end)
 
-    after_each(function()
-      if admin_client and proxy_client then
-        admin_client:close()
-        proxy_client:close()
-      end
-    end)
-
+    local service
     local route
-    local plugin
+    local basic_auth_plugin
+    local upstream_basic_auth_plugin
     local consumer
     local credential
+    local upstream_credential
 
     before_each(function()
       proxy_client = helpers.proxy_client()
       admin_client = helpers.admin_client()
 
-      if not route then
-        route = admin_api.routes:insert {
-          hosts = { "mb-auth-plugin.com" },
+      if not service then
+        service = admin_api.services:insert {
+          path = "/request",
         }
       end
 
-      if not plugin then
-        plugin = admin_api.plugins:insert {
+      if not route then
+        route = admin_api.routes:insert {
+          hosts   = { "basic-auth.com" },
+          service = { id = service.id },
+        }
+      end
+
+      if not basic_auth_plugin then
+        basic_auth_plugin = admin_api.plugins:insert {
+          name = "basic-auth",
+          route = { id = route.id },
+        }
+      end
+
+      if not upstream_basic_auth_plugin then
+        upstream_basic_auth_plugin = admin_api.plugins:insert {
           name = "mb-auth-plugin",
           route = { id = route.id },
         }
@@ -63,158 +75,211 @@ for _, strategy in helpers.each_strategy() do
       end
 
       if not credential then
-        credential = admin_api.mbbasicauth_credentials:insert {
+        credential = admin_api.basicauth_credentials:insert {
           username = "bob",
           password = "kong",
           consumer = { id = consumer.id },
         }
       end
+
+      if not upstream_credential then
+        upstream_credential = assert(db.mbbasicauth_credentials:insert {
+          username = "king",
+          password = "kong",
+          consumer = { id = consumer.id },
+        })
+
+        -- NOTE: since 1) Kong caches negative responses
+        -- and 2) direct DB manipulations from this unit test don't trigger cache invalidation,
+        -- we have to explicitly invalidate cache
+
+        helpers.wait_until(function()
+          local cache_key = db.mbbasicauth_credentials:cache_key(consumer.id)
+          local res = assert(admin_client:send {
+            method = "DELETE",
+            path = "/cache/" .. cache_key
+          })
+          res:read_body()
+          return res.status == 204
+        end)
+      end
     end)
 
-    it("#invalidates credentials when the Consumer is deleted", function()
+    after_each(function()
+      if admin_client and proxy_client then
+        admin_client:close()
+        proxy_client:close()
+      end
+    end)
+
+    it("invalidates credentials when the Consumer is deleted", function()
       -- populate cache
       local res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(200, res)
+      local body = assert.res_status(200, res)
+      local json = cjson.decode(body)
+      local consumer_id = json.headers["x-consumer-id"]
 
       -- ensure cache is populated
-      local cache_key = db.mbbasicauth_credentials:cache_key("bob")
+      local cache_key = db.mbbasicauth_credentials:cache_key(consumer_id)
       res = assert(admin_client:send {
         method = "GET",
-        path   = "/cache/" .. cache_key
+        path = "/cache/" .. cache_key
       })
       assert.res_status(200, res)
 
       -- delete Consumer entity
       res = assert(admin_client:send {
         method = "DELETE",
-        path   = "/consumers/bob"
+        path = "/consumers/bob"
       })
       assert.res_status(204, res)
       consumer = nil
       credential = nil
+      upstream_credential = nil
 
       -- ensure cache is invalidated
-      helpers.wait_for_invalidation(cache_key)
+      helpers.wait_until(function()
+        local res = assert(admin_client:send {
+          method = "GET",
+          path = "/cache/" .. cache_key
+        })
+        res:read_body()
+        return res.status == 404
+      end)
 
       res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(401, res)
+      assert.res_status(403, res)
     end)
 
     it("invalidates credentials from cache when deleted", function()
       -- populate cache
       local res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(200, res)
+      local body = assert.res_status(200, res)
+      local json = cjson.decode(body)
+      local consumer_id = json.headers["x-consumer-id"]
 
       -- ensure cache is populated
-      local cache_key = db.mbbasicauth_credentials:cache_key("bob")
+      local cache_key = db.mbbasicauth_credentials:cache_key(consumer_id)
       res = assert(admin_client:send {
         method = "GET",
-        path   = "/cache/" .. cache_key
+        path = "/cache/" .. cache_key
       })
       local body = assert.res_status(200, res)
-      local cred = cjson.decode(body)
+      local credential = cjson.decode(body)
 
       -- delete credential entity
       res = assert(admin_client:send {
         method = "DELETE",
-        path   = "/consumers/bob/mb-auth-plugin/" .. cred.id
+        path = "/consumers/bob/mb-auth-plugin/" .. credential.id
       })
       assert.res_status(204, res)
-      credential = nil
+      upstream_credential = nil
 
       -- ensure cache is invalidated
-      helpers.wait_for_invalidation(cache_key)
+      helpers.wait_until(function()
+        local res = assert(admin_client:send {
+          method = "GET",
+          path = "/cache/" .. cache_key
+        })
+        res:read_body()
+        return res.status == 404
+      end)
 
       res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(401, res)
+      local body = assert.res_status(403, res)
+      local json = cjson.decode(body)
+      assert.same({ message = "no basic auth credentials available for consumer" }, json)
     end)
 
     it("invalidated credentials from cache when updated", function()
       -- populate cache
       local res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(200, res)
+      local body = assert.res_status(200, res)
+      local json = cjson.decode(body)
+      local consumer_id = json.headers["x-consumer-id"]
 
       -- ensure cache is populated
-      local cache_key = db.mbbasicauth_credentials:cache_key("bob")
+      local cache_key = db.mbbasicauth_credentials:cache_key(consumer_id)
       res = assert(admin_client:send {
         method = "GET",
-        path   = "/cache/" .. cache_key
+        path = "/cache/" .. cache_key
       })
       local body = assert.res_status(200, res)
-      local cred = cjson.decode(body)
+      local credential = cjson.decode(body)
 
       -- delete credential entity
       res = assert(admin_client:send {
-        method     = "PATCH",
-        path       = "/consumers/bob/mb-auth-plugin/" .. cred.id,
-        body       = {
-          username = "bob",
+        method = "PATCH",
+        path = "/consumers/bob/mb-auth-plugin/" .. credential.id,
+        body = {
+          username = "king",
           password = "kong-updated"
         },
-        headers    = {
+        headers = {
           ["Content-Type"] = "application/json"
         }
       })
       assert.res_status(200, res)
-      credential = nil
+      upstream_credential = nil
 
       -- ensure cache is invalidated
-      helpers.wait_for_invalidation(cache_key)
+      helpers.wait_until(function()
+        local res = assert(admin_client:send {
+          method = "GET",
+          path = "/cache/" .. cache_key
+        })
+        res:read_body()
+        return res.status == 404
+      end)
 
       res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
+        method = "GET",
+        path = "/",
         headers = {
           ["Authorization"] = "Basic Ym9iOmtvbmc=",
-          ["Host"]          = "mb-auth-plugin.com"
+          ["Host"] = "basic-auth.com"
         }
       })
-      assert.res_status(401, res)
-
-      res = assert(proxy_client:send {
-        method  = "GET",
-        path    = "/",
-        headers = {
-          ["Authorization"] = "Basic Ym9iOmtvbmctdXBkYXRlZA==",
-          ["Host"]          = "mb-auth-plugin.com"
-        }
-      })
-      assert.res_status(200, res)
+      local body = assert.res_status(200, res)
+      local json = cjson.decode(body)
+      assert.is_string(json.headers["x-consumer-id"])
+      assert.equal("bob", json.headers["x-consumer-username"])
+      assert.equal("Basic a2luZzprb25nLXVwZGF0ZWQ=", json.headers["authorization"])
     end)
   end)
 end
