@@ -61,20 +61,3 @@ curl --user aladdin:close-the-door http://localhost:8000/headers
 
 curl http://localhost:8000/headers
 ```
-
-
-## Installation
-To install the plugin, type:
-```
-luarocks install kong-plugin-upstream-basic-auth
-```
-And add the custom plugin to the `kong.conf` file (e.g. `/etc/kong/kong.conf`)
-```
-plugins = bundled,upstream-basic-auth
-```
-Create the required database tables, by running:
-```
-kong stop
-kong migrations up
-kong start
-```
